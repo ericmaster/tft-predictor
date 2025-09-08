@@ -2,10 +2,11 @@ import os
 import pandas as pd
 import numpy as np
 from typing import Optional, List
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 from pytorch_forecasting import TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer
 import warnings
+import random
 warnings.filterwarnings("ignore")
 
 
@@ -24,7 +25,8 @@ class TFTDataModule(pl.LightningDataModule):
         min_sequence_length: int = 100,
         target: str = "duration",
         time_idx: str = "distance",
-        group_ids: List[str] = None
+        group_ids: List[str] = None,
+        random_seed: int = 42
     ):
         """
         Initialize the TFT DataModule.
@@ -41,6 +43,7 @@ class TFTDataModule(pl.LightningDataModule):
             target: Target variable name
             time_idx: Time index column name
             group_ids: List of group identifier columns
+            random_seed: Random seed for deterministic shuffling
         """
         super().__init__()
         self.data_dir = data_dir
@@ -54,6 +57,7 @@ class TFTDataModule(pl.LightningDataModule):
         self.target = target
         self.time_idx = time_idx
         self.group_ids = group_ids or ["session_id"]
+        self.random_seed = random_seed
         
         # Data storage
         self.training = None
@@ -85,6 +89,10 @@ class TFTDataModule(pl.LightningDataModule):
         # Combine all sessions
         self.full_data = pd.concat(all_sessions, ignore_index=True)
         
+        # Convert distance to integer (required by TimeSeriesDataSet)
+        # Round to nearest integer to maintain 2m intervals as integers
+        self.full_data['distance'] = self.full_data['distance'].round().astype(int)
+        
         # Create a proper time index
         self.full_data = self.full_data.sort_values(['session_id', 'distance']).reset_index(drop=True)
         
@@ -95,42 +103,48 @@ class TFTDataModule(pl.LightningDataModule):
         if self.full_data is None:
             self.prepare_data()
         
-        # Create a combined dataset
-        processed_data = []
+        # Get unique session IDs (sorted for consistency, no shuffling)
+        all_session_ids = sorted(self.full_data['session_id'].unique())
         
-        for session_id in self.full_data['session_id'].unique():
-            session_data = self.full_data[self.full_data['session_id'] == session_id].copy()
+        # Create session mapping for integer encoding
+        session_mapping = {session: idx for idx, session in enumerate(all_session_ids)}
+        self.full_data['session_id_encoded'] = self.full_data['session_id'].map(session_mapping)
+        
+        # Use temporal splits within each session instead of splitting by sessions
+        # This ensures all datasets use the same sessions (avoiding categorical encoding issues)
+        
+        # For each session, split temporally: first 70% for train, next 15% for val, last 15% for test
+        train_data_list = []
+        val_data_list = []
+        test_data_list = []
+        
+        for session_id in self.full_data['session_id_encoded'].unique():
+            session_data = self.full_data[self.full_data['session_id_encoded'] == session_id].copy()
             session_data = session_data.sort_values('distance').reset_index(drop=True)
             
-            # Add split information based on temporal position within session
-            total_length = len(session_data)
-            train_split_point = int(total_length * 0.7)
-            val_split_point = int(total_length * 0.85)
+            n_points = len(session_data)
+            train_end = int(n_points * self.train_split)
+            val_end = int(n_points * (self.train_split + self.val_split))
             
-            session_data['split'] = 'train'
-            session_data.loc[train_split_point:val_split_point, 'split'] = 'val'
-            session_data.loc[val_split_point:, 'split'] = 'test'
-            
-            processed_data.append(session_data)
+            # Ensure we have enough data for each split
+            min_seq_len = self.max_encoder_length + self.max_prediction_length
+            if train_end >= min_seq_len:
+                train_data_list.append(session_data[:train_end])
+            if val_end - train_end >= min_seq_len and val_end <= n_points:
+                val_data_list.append(session_data[train_end:val_end])
+            if n_points - val_end >= min_seq_len:
+                test_data_list.append(session_data[val_end:])
         
-        # Combine all processed sessions
-        combined_data = pd.concat(processed_data, ignore_index=True)
+        # Combine the splits
+        train_data = pd.concat(train_data_list, ignore_index=True) if train_data_list else pd.DataFrame()
+        val_data = pd.concat(val_data_list, ignore_index=True) if val_data_list else pd.DataFrame()
+        test_data = pd.concat(test_data_list, ignore_index=True) if test_data_list else pd.DataFrame()
         
-        # Split data
-        train_data = combined_data[combined_data['split'] == 'train'].copy()
-        val_data = combined_data[combined_data['split'].isin(['train', 'val'])].copy()  # Include train for encoder
-        test_data = combined_data[combined_data['split'].isin(['train', 'test'])].copy()  # Include train for encoder
-        
-        # Add integer encoding for session_id
-        all_sessions_sorted = sorted(combined_data['session_id'].unique())
-        session_mapping = {session: idx for idx, session in enumerate(all_sessions_sorted)}
-        
-        train_data['session_id_encoded'] = train_data['session_id'].map(session_mapping)
-        val_data['session_id_encoded'] = val_data['session_id'].map(session_mapping)
-        test_data['session_id_encoded'] = test_data['session_id'].map(session_mapping)
-        
-        print(f"Data split - Sessions: {len(all_sessions_sorted)}")
+        print(f"Temporal splits within sessions:")
         print(f"Train data points: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}")
+        print(f"Training sessions: {train_data['session_id'].nunique() if len(train_data) > 0 else 0}")
+        print(f"Validation sessions: {val_data['session_id'].nunique() if len(val_data) > 0 else 0}")
+        print(f"Test sessions: {test_data['session_id'].nunique() if len(test_data) > 0 else 0}")
         
         # Define known future variables (these will be available at prediction time)
         time_varying_known_reals = [
@@ -149,7 +163,7 @@ class TFTDataModule(pl.LightningDataModule):
             "speed"
         ]
         
-        # Create training dataset
+        # Create training dataset first
         self.training = TimeSeriesDataSet(
             train_data,
             time_idx="distance",
@@ -163,10 +177,10 @@ class TFTDataModule(pl.LightningDataModule):
             add_relative_time_idx=True,
             add_target_scales=True,
             randomize_length=None,
-            allow_missing_timesteps=True,  # Allow missing timesteps
+            allow_missing_timesteps=True,
         )
         
-        # Create validation dataset
+        # Create validation dataset - use from_dataset to ensure consistency
         self.validation = TimeSeriesDataSet.from_dataset(
             self.training, 
             val_data, 
@@ -174,11 +188,11 @@ class TFTDataModule(pl.LightningDataModule):
             stop_randomization=True
         )
         
-        # Create test dataset
+        # Create test dataset - use from_dataset to ensure consistency  
         self.test = TimeSeriesDataSet.from_dataset(
-            self.training,
-            test_data,
-            predict=True,
+            self.training, 
+            test_data, 
+            predict=True, 
             stop_randomization=True
         )
         

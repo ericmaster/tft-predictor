@@ -1,87 +1,37 @@
-from typing import Optional, List, Dict, Any
-import pytorch_lightning as pl
+from typing import Optional, List
 import torch
-from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
-from pytorch_forecasting.data import GroupNormalizer
+from pytorch_forecasting import TemporalFusionTransformer
 from pytorch_forecasting.metrics import SMAPE, MAE, RMSE
 
 
-# import warnings
-# warnings.filterwarnings("ignore")
-
-
-class TrailRunningTFT(pl.LightningModule):
+class TrailRunningTFT(TemporalFusionTransformer):
     """Temporal Fusion Transformer for Trail Running Time Prediction."""
     
-    def __init__(
-        self,
-        training_dataset: TimeSeriesDataSet,
-        learning_rate: float = 0.03,
-        hidden_size: int = 16,
-        attention_head_size: int = 1,
-        dropout: float = 0.1,
-        hidden_continuous_size: int = 8,
-        output_size: int = 7,
-        loss: torch.nn.Module = None,
-        logging_metrics: List = None
-    ):
+    @classmethod
+    def from_dataset(cls, dataset, **kwargs):
         """
-        Initialize the TFT model.
-        
-        Args:
-            training_dataset: Training dataset to derive model parameters
-            learning_rate: Learning rate for optimization
-            hidden_size: Hidden size of the TFT
-            attention_head_size: Number of attention heads
-            dropout: Dropout rate
-            hidden_continuous_size: Hidden size for continuous variables
-            output_size: Number of outputs from TFT (quantile outputs)
-            loss: Loss function
-            logging_metrics: List of metrics to log
+        Instantiate TrailRunningTFT from a TimeSeriesDataSet with optimized defaults for trail running.
         """
-        super().__init__()
-        self.save_hyperparameters()
+        # Set our preferred defaults only if not already provided
+        if 'learning_rate' not in kwargs:
+            kwargs['learning_rate'] = 0.03
+        if 'hidden_size' not in kwargs:
+            kwargs['hidden_size'] = 16
+        if 'attention_head_size' not in kwargs:
+            kwargs['attention_head_size'] = 1
+        if 'dropout' not in kwargs:
+            kwargs['dropout'] = 0.1
+        if 'hidden_continuous_size' not in kwargs:
+            kwargs['hidden_continuous_size'] = 8
+        if 'output_size' not in kwargs:
+            kwargs['output_size'] = 1  # Single output for regression with SMAPE
+        if 'loss' not in kwargs:
+            kwargs['loss'] = SMAPE()
+        if 'logging_metrics' not in kwargs:
+            kwargs['logging_metrics'] = [SMAPE(), MAE(), RMSE()]
+        if 'reduce_on_plateau_patience' not in kwargs:
+            kwargs['reduce_on_plateau_patience'] = 4
         
-        # Default loss and metrics
-        if loss is None:
-            loss = SMAPE()
-        
-        if logging_metrics is None:
-            logging_metrics = [SMAPE(), MAE(), RMSE()]
-        
-        # Create TFT model
-        self.model = TemporalFusionTransformer.from_dataset(
-            training_dataset,
-            learning_rate=learning_rate,
-            hidden_size=hidden_size,
-            attention_head_size=attention_head_size,
-            dropout=dropout,
-            hidden_continuous_size=hidden_continuous_size,
-            output_size=output_size,
-            loss=loss,
-            log_interval=10,
-            log_val_interval=1,
-            logging_metrics=logging_metrics,
-            reduce_on_plateau_patience=4,
-        )
+        # Call parent's from_dataset
+        return super().from_dataset(dataset, **kwargs)
     
-    def forward(self, x):
-        return self.model(x)
-    
-    def training_step(self, batch, batch_idx):
-        return self.model.training_step(batch, batch_idx)
-    
-    def validation_step(self, batch, batch_idx):
-        return self.model.validation_step(batch, batch_idx)
-    
-    def test_step(self, batch, batch_idx):
-        return self.model.test_step(batch, batch_idx)
-    
-    def configure_optimizers(self):
-        return self.model.configure_optimizers()
-    
-    def predict(self, dataloader, mode: str = "prediction"):
-        """Make predictions using the trained model."""
-        return self.model.predict(dataloader, mode=mode)
-
-
