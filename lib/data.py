@@ -24,7 +24,7 @@ class TFTDataModule(pl.LightningDataModule):
         val_split: float = 0.15,
         min_sequence_length: int = 100,
         target: str = "duration",
-        time_idx: str = "distance",
+        time_idx: str = "time_idx",
         group_ids: List[str] = None,
         random_seed: int = 42
     ):
@@ -75,26 +75,25 @@ class TFTDataModule(pl.LightningDataModule):
         
         for file in csv_files:
             file_path = os.path.join(self.data_dir, file)
-            try:
-                df = pd.read_csv(file_path)
-                
-                # Add session identifier
-                df['session_id'] = file.replace('.csv', '')
-                
-                all_sessions.append(df)
-                    
-            except Exception as e:
-                print(f"Error loading {file}: {e}")
+            df = pd.read_csv(file_path)
+            # Add session identifier
+            df['session_id'] = file.replace('.csv', '')
+            all_sessions.append(df)
         
         # Combine all sessions
         self.full_data = pd.concat(all_sessions, ignore_index=True)
         
-        # Convert distance to integer (required by TimeSeriesDataSet)
-        # Round to nearest integer to maintain 2m intervals as integers
-        self.full_data['distance'] = self.full_data['distance'].round().astype(int)
+        # Create proper sequential "time indices" for TimeSeriesDataSet
+        # Instead of using distance directly, create sequential indices per session
+        session_data = []
+        for session_id, group in self.full_data.groupby('session_id'):
+            # Sort by distance to ensure proper order
+            group = group.sort_values('distance').reset_index(drop=True)
+            # Create sequential "time index" starting from 0 for each session
+            group['time_idx'] = range(len(group))
+            session_data.append(group)
         
-        # Create a proper time index
-        self.full_data = self.full_data.sort_values(['session_id', 'distance']).reset_index(drop=True)
+        self.full_data = pd.concat(session_data, ignore_index=True)
         
         print(f"Loaded {len(all_sessions)} sessions with {len(self.full_data)} total data points")
     
@@ -103,48 +102,64 @@ class TFTDataModule(pl.LightningDataModule):
         if self.full_data is None:
             self.prepare_data()
         
-        # Get unique session IDs (sorted for consistency, no shuffling)
+        # Extract timestamp-based integer IDs from session names
+        # Session format: training-session-YYYY-MM-DD-timestamp-uuid
+        def extract_session_timestamp(session_id):
+            """Extract timestamp from session ID for use as integer identifier."""
+            try:
+                # Split by '-' and get the timestamp part (index 5)
+                parts = session_id.split('-')
+                if len(parts) >= 6:
+                    timestamp = int(parts[5])  # The numeric timestamp
+                    return timestamp
+                else:
+                    # Fallback: use hash of session_id if format is unexpected
+                    return abs(hash(session_id)) % (10**10)
+            except (ValueError, IndexError):
+                # Fallback: use hash of session_id
+                return abs(hash(session_id)) % (10**10)
+        
+        self.full_data['session_id_encoded'] = self.full_data['session_id'].apply(extract_session_timestamp)
+        
+        # Filter out sessions that are too short for our sequence requirements
+        session_lengths = self.full_data.groupby('session_id_encoded').size()
+        min_required = self.max_encoder_length + self.max_prediction_length
+        valid_sessions = session_lengths[session_lengths >= min_required].index
+        
+        print(f"Minimum required sequence length: {min_required}")
+        print(f"Valid sessions (sufficient length): {len(valid_sessions)}/{len(session_lengths)}")
+        
+        # Filter data to only include valid sessions
+        self.full_data = self.full_data[self.full_data['session_id_encoded'].isin(valid_sessions)].copy()
+        
+        # Split by sessions for cold-start evaluation
+        # This tests the model's ability to predict on completely new sessions
         all_session_ids = sorted(self.full_data['session_id'].unique())
+        n_sessions = len(all_session_ids)
         
-        # Create session mapping for integer encoding
-        session_mapping = {session: idx for idx, session in enumerate(all_session_ids)}
-        self.full_data['session_id_encoded'] = self.full_data['session_id'].map(session_mapping)
+        train_sessions = int(n_sessions * self.train_split)
+        val_sessions = int(n_sessions * self.val_split)
         
-        # Use temporal splits within each session instead of splitting by sessions
-        # This ensures all datasets use the same sessions (avoiding categorical encoding issues)
+        train_session_ids = all_session_ids[:train_sessions]
+        val_session_ids = all_session_ids[train_sessions:train_sessions + val_sessions]
+        test_session_ids = all_session_ids[train_sessions + val_sessions:]
         
-        # For each session, split temporally: first 70% for train, next 15% for val, last 15% for test
-        train_data_list = []
-        val_data_list = []
-        test_data_list = []
+        # Create data splits by sessions
+        train_data = self.full_data[self.full_data['session_id'].isin(train_session_ids)].copy()
+        val_data = self.full_data[self.full_data['session_id'].isin(val_session_ids)].copy()
+        test_data = self.full_data[self.full_data['session_id'].isin(test_session_ids)].copy()
         
-        for session_id in self.full_data['session_id_encoded'].unique():
-            session_data = self.full_data[self.full_data['session_id_encoded'] == session_id].copy()
-            session_data = session_data.sort_values('distance').reset_index(drop=True)
-            
-            n_points = len(session_data)
-            train_end = int(n_points * self.train_split)
-            val_end = int(n_points * (self.train_split + self.val_split))
-            
-            # Ensure we have enough data for each split
-            min_seq_len = self.max_encoder_length + self.max_prediction_length
-            if train_end >= min_seq_len:
-                train_data_list.append(session_data[:train_end])
-            if val_end - train_end >= min_seq_len and val_end <= n_points:
-                val_data_list.append(session_data[train_end:val_end])
-            if n_points - val_end >= min_seq_len:
-                test_data_list.append(session_data[val_end:])
-        
-        # Combine the splits
-        train_data = pd.concat(train_data_list, ignore_index=True) if train_data_list else pd.DataFrame()
-        val_data = pd.concat(val_data_list, ignore_index=True) if val_data_list else pd.DataFrame()
-        test_data = pd.concat(test_data_list, ignore_index=True) if test_data_list else pd.DataFrame()
-        
-        print(f"Temporal splits within sessions:")
+        print(f"Session-based splits for cold-start evaluation:")
+        print(f"Train sessions: {len(train_session_ids)}, Val sessions: {len(val_session_ids)}, Test sessions: {len(test_session_ids)}")
         print(f"Train data points: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}")
-        print(f"Training sessions: {train_data['session_id'].nunique() if len(train_data) > 0 else 0}")
-        print(f"Validation sessions: {val_data['session_id'].nunique() if len(val_data) > 0 else 0}")
-        print(f"Test sessions: {test_data['session_id'].nunique() if len(test_data) > 0 else 0}")
+        
+        # Verify no overlap between splits
+        overlap_train_val = set(train_data['session_id'].unique()) & set(val_data['session_id'].unique())
+        overlap_train_test = set(train_data['session_id'].unique()) & set(test_data['session_id'].unique())
+        print(f"Overlap between train-val: {len(overlap_train_val)}, train-test: {len(overlap_train_test)}")
+        
+        # With timestamp-based IDs, we don't need complex re-encoding
+        # Each session already has a unique integer ID based on its timestamp
         
         # Define known future variables (these will be available at prediction time)
         time_varying_known_reals = [
@@ -163,10 +178,13 @@ class TFTDataModule(pl.LightningDataModule):
             "speed"
         ]
         
-        # Create training dataset first
+        # Create training dataset
+        # For cold-start evaluation with timestamp-based session IDs, we need to handle unknown sessions
+        from pytorch_forecasting.data.encoders import NaNLabelEncoder
+        
         self.training = TimeSeriesDataSet(
             train_data,
-            time_idx="distance",
+            time_idx="time_idx",
             target=self.target,
             group_ids=["session_id_encoded"],
             max_encoder_length=self.max_encoder_length,
@@ -178,9 +196,11 @@ class TFTDataModule(pl.LightningDataModule):
             add_target_scales=True,
             randomize_length=None,
             allow_missing_timesteps=True,
+            categorical_encoders={"session_id_encoded": NaNLabelEncoder(add_nan=True)},
         )
         
-        # Create validation dataset - use from_dataset to ensure consistency
+        # Create validation and test datasets directly
+        # Unknown timestamp-based session IDs will be handled as NaN/unknown category
         self.validation = TimeSeriesDataSet.from_dataset(
             self.training, 
             val_data, 
@@ -188,7 +208,6 @@ class TFTDataModule(pl.LightningDataModule):
             stop_randomization=True
         )
         
-        # Create test dataset - use from_dataset to ensure consistency  
         self.test = TimeSeriesDataSet.from_dataset(
             self.training, 
             test_data, 
