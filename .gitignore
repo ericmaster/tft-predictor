@@ -209,5 +209,6 @@ __marimo__/
 data
 logs
 lightning_logs
+checkpoints
 debug_*
 test_*

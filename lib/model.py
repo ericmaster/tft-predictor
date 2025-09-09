@@ -2,11 +2,28 @@ from typing import Optional, List
 import torch
 from pytorch_forecasting import TemporalFusionTransformer
 from pytorch_forecasting.metrics import SMAPE, MAE, RMSE
-
+from pytorch_forecasting.models.temporal_fusion_transformer.sub_modules import InterpretableMultiHeadAttention
 
 class TrailRunningTFT(TemporalFusionTransformer):
     """Temporal Fusion Transformer for Trail Running Time Prediction."""
-    
+
+    def __init__(self, mask_bias: float = -1e4, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._override_mask_bias(mask_bias)
+
+    def _override_mask_bias(self, mask_bias_value: float):
+        """Override mask_bias in all InterpretableMultiHeadAttention modules."""
+        for module in self.modules():
+            if isinstance(module, InterpretableMultiHeadAttention):
+                # Override the mask_bias used in its internal attention
+                if hasattr(module, "mask_bias"):
+                    module.mask_bias = mask_bias_value
+                # Also override in the nested MultiHeadAttention if accessible
+                if hasattr(module, "_attention"):
+                    attention_module = getattr(module, "_attention", None)
+                    if attention_module is not None and hasattr(attention_module, "mask_bias"):
+                        attention_module.mask_bias = mask_bias_value
+
     @classmethod
     def from_dataset(cls, dataset, **kwargs):
         """

@@ -4,7 +4,7 @@ import numpy as np
 from typing import Optional, List
 import lightning.pytorch as pl
 from pytorch_forecasting import TimeSeriesDataSet
-from pytorch_forecasting.data import GroupNormalizer
+from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
 import warnings
 import random
 warnings.filterwarnings("ignore")
@@ -16,14 +16,15 @@ class TFTDataModule(pl.LightningDataModule):
     def __init__(
         self,
         data_dir: str = "./data/resampled",
-        max_encoder_length: int = 50,
-        max_prediction_length: int = 10,
+        min_encoder_length: int = 50,
+        max_encoder_length: int = 250,
+        max_prediction_length: int = 50,
         batch_size: int = 64,
         num_workers: int = 4,
         train_split: float = 0.7,
-        val_split: float = 0.15,
+        val_split: float = 0.15, # 0.15 test split
         min_sequence_length: int = 100,
-        target: str = "duration",
+        # target: str = "duration",
         time_idx: str = "time_idx",
         group_ids: List[str] = None,
         random_seed: int = 42
@@ -47,6 +48,7 @@ class TFTDataModule(pl.LightningDataModule):
         """
         super().__init__()
         self.data_dir = data_dir
+        self.min_encoder_length = min_encoder_length
         self.max_encoder_length = max_encoder_length
         self.max_prediction_length = max_prediction_length
         self.batch_size = batch_size
@@ -54,7 +56,7 @@ class TFTDataModule(pl.LightningDataModule):
         self.train_split = train_split
         self.val_split = val_split
         self.min_sequence_length = min_sequence_length
-        self.target = target
+        # self.target = target
         self.time_idx = time_idx
         self.group_ids = group_ids or ["session_id"]
         self.random_seed = random_seed
@@ -76,50 +78,27 @@ class TFTDataModule(pl.LightningDataModule):
         for file in csv_files:
             file_path = os.path.join(self.data_dir, file)
             df = pd.read_csv(file_path)
-            # Add session identifier
-            df['session_id'] = file.replace('.csv', '')
             all_sessions.append(df)
         
         # Combine all sessions
         self.full_data = pd.concat(all_sessions, ignore_index=True)
         
-        # Create proper sequential "time indices" for TimeSeriesDataSet
-        # Instead of using distance directly, create sequential indices per session
-        session_data = []
-        for session_id, group in self.full_data.groupby('session_id'):
-            # Sort by distance to ensure proper order
-            group = group.sort_values('distance').reset_index(drop=True)
-            # Create sequential "time index" starting from 0 for each session
-            group['time_idx'] = range(len(group))
-            session_data.append(group)
-        
-        self.full_data = pd.concat(session_data, ignore_index=True)
-        
         print(f"Loaded {len(all_sessions)} sessions with {len(self.full_data)} total data points")
     
     def setup(self, stage: Optional[str] = None):
         """Setup train, validation, and test datasets."""
+
+        if stage == 'fit' and self.training is not None:
+            return # Already setup
+
+        if stage == 'val' and self.validation is not None:
+            return # Already setup
+        
+        if stage == 'test' and self.test is not None:
+            return # Already setup
+
         if self.full_data is None:
             self.prepare_data()
-        
-        # Extract timestamp-based integer IDs from session names
-        # Session format: training-session-YYYY-MM-DD-timestamp-uuid
-        def extract_session_timestamp(session_id):
-            """Extract timestamp from session ID for use as integer identifier."""
-            try:
-                # Split by '-' and get the timestamp part (index 5)
-                parts = session_id.split('-')
-                if len(parts) >= 6:
-                    timestamp = int(parts[5])  # The numeric timestamp
-                    return timestamp
-                else:
-                    # Fallback: use hash of session_id if format is unexpected
-                    return abs(hash(session_id)) % (10**10)
-            except (ValueError, IndexError):
-                # Fallback: use hash of session_id
-                return abs(hash(session_id)) % (10**10)
-        
-        self.full_data['session_id_encoded'] = self.full_data['session_id'].apply(extract_session_timestamp)
         
         # Filter out sessions that are too short for our sequence requirements
         session_lengths = self.full_data.groupby('session_id_encoded').size()
@@ -158,44 +137,56 @@ class TFTDataModule(pl.LightningDataModule):
         overlap_train_test = set(train_data['session_id'].unique()) & set(test_data['session_id'].unique())
         print(f"Overlap between train-val: {len(overlap_train_val)}, train-test: {len(overlap_train_test)}")
         
-        # With timestamp-based IDs, we don't need complex re-encoding
-        # Each session already has a unique integer ID based on its timestamp
-        
         # Define known future variables (these will be available at prediction time)
         time_varying_known_reals = [
             "altitude", 
             "elevation_diff", 
             "elevation_gain",
-            "elevation_loss", 
-            "distance_diff"
+            "elevation_loss",
+            # "distance", # Skip, redundant information since series are based on distance
         ]
         
-        # Define unknown future variables (these need to be predicted/estimated)
-        time_varying_unknown_reals = [
+        # Define target and unknown future variables (these need to be predicted/estimated)
+        # We are performing multi-target forecasting: predict all these variables
+        # Their past values are used as inputs to help predict their own and others' futures
+        target = time_varying_unknown_reals = [
+            "duration",
             "heartRate",
             "temperature", 
             "cadence", 
             "speed"
         ]
+
+        target_normalizer = MultiNormalizer(
+            [
+                GroupNormalizer(
+                    groups=["session_id_encoded"],
+                    transformation="softplus"
+                )
+                for _ in target
+            ]
+        )
         
         # Create training dataset
-        # For cold-start evaluation with timestamp-based session IDs, we need to handle unknown sessions
+        # session_id_encoded is pre-calculated by DataResampler for cold-start evaluation
         from pytorch_forecasting.data.encoders import NaNLabelEncoder
         
         self.training = TimeSeriesDataSet(
             train_data,
             time_idx="time_idx",
-            target=self.target,
+            # target=self.target,
+            target=target, # multi-target
             group_ids=["session_id_encoded"],
+            min_encoder_length=self.min_encoder_length,
             max_encoder_length=self.max_encoder_length,
             max_prediction_length=self.max_prediction_length,
             time_varying_known_reals=time_varying_known_reals,
             time_varying_unknown_reals=time_varying_unknown_reals,
-            target_normalizer=GroupNormalizer(groups=["session_id_encoded"], transformation="softplus"),
+            target_normalizer=target_normalizer,
             add_relative_time_idx=True,
             add_target_scales=True,
             randomize_length=None,
-            allow_missing_timesteps=True,
+            allow_missing_timesteps=False, # We probably want to avoid this
             categorical_encoders={"session_id_encoded": NaNLabelEncoder(add_nan=True)},
         )
         

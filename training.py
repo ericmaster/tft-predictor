@@ -5,6 +5,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, Learning
 from lib.model import TrailRunningTFT
 from lib.data import TFTDataModule
 
+pl.seed_everything(42, workers=True)
+
 def find_latest_checkpoint():
     checkpoints_dir = f"./checkpoints/"
     all_checkpoints = []
@@ -19,10 +21,11 @@ def find_latest_checkpoint():
 def train_tft_model(
     data_dir: str = "./data/resampled",
     max_epochs: int = 30,
-    max_encoder_length: int = 50,
-    max_prediction_length: int = 10,
+    min_encoder_length: int = 50,
+    max_encoder_length: int = 250,
+    max_prediction_length: int = 50,
     batch_size: int = 32,
-    hidden_size: int = 16,
+    hidden_size: int = 64,
     learning_rate: float = 0.03
 ):
     """
@@ -44,19 +47,21 @@ def train_tft_model(
     # Create data module
     data_module = TFTDataModule(
         data_dir=data_dir,
+        min_encoder_length=min_encoder_length,
         max_encoder_length=max_encoder_length,
         max_prediction_length=max_prediction_length,
         batch_size=batch_size
     )
     
     # Setup data
-    data_module.setup()
+    data_module.setup(stage="fit")
     
     # Create model
     model = TrailRunningTFT.from_dataset(
         data_module.training,
         hidden_size=hidden_size,
-        learning_rate=learning_rate
+        learning_rate=learning_rate,
+        output_size=[1] * 5, # Multi-target output 
     )
 
     # Callbacks
@@ -84,11 +89,14 @@ def train_tft_model(
     trainer = pl.Trainer(
         max_epochs=max_epochs,
         accelerator='auto',
+        strategy='ddp',
         logger=logger,
-        devices=1,  # Use only 1 device to avoid distributed training issues
+        devices=4,
         gradient_clip_val=0.1,
         # limit_train_batches=50,  # Limit for faster training during development
         enable_checkpointing=True,
+        precision="32-true",  # Use full precision for better accuracy
+        # precision="16-mixed",  # Mixed precision for speed and resource efficiency
         callbacks=[
             early_stopping_callback,
             learning_rate_callback,
@@ -113,10 +121,11 @@ if __name__ == "__main__":
     model, data_module, trainer = train_tft_model(
         data_dir="./data/resampled",
         max_epochs=100,
+        min_encoder_length=50,
         max_encoder_length=250,
         max_prediction_length=50,
         batch_size=32,
-        hidden_size=16
+        hidden_size=64
     )
     
     print("Training completed!")
