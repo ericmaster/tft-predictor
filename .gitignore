@@ -212,3 +212,4 @@ lightning_logs
 checkpoints
 debug_*
 test_*
+backups

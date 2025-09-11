@@ -26,7 +26,7 @@ def train_tft_model(
     max_prediction_length: int = 50,
     batch_size: int = 32,
     hidden_size: int = 64,
-    learning_rate: float = 0.03
+    learning_rate: float = 0.001
 ):
     """
     Train the TFT model.
@@ -76,7 +76,7 @@ def train_tft_model(
 
     early_stopping_callback = EarlyStopping(
         monitor="val_loss",
-        patience=10,
+        patience=15,  # Kept large to check for overfitting
         verbose=True,
         mode="min"
     )
@@ -91,7 +91,7 @@ def train_tft_model(
         accelerator='auto',
         strategy='ddp',
         logger=logger,
-        devices=4,
+        devices=2,
         gradient_clip_val=0.1,
         # limit_train_batches=50,  # Limit for faster training during development
         enable_checkpointing=True,
@@ -120,10 +120,10 @@ if __name__ == "__main__":
     # Train the model
     model, data_module, trainer = train_tft_model(
         data_dir="./data/resampled",
-        max_epochs=100,
-        min_encoder_length=50,
-        max_encoder_length=250,
-        max_prediction_length=50,
+        max_epochs=50,  # Likely early stop will trigger
+        min_encoder_length=30,
+        max_encoder_length=150,  # Larger may overfit
+        max_prediction_length=20,
         batch_size=32,
         hidden_size=64
     )

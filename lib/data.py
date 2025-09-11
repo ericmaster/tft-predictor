@@ -16,9 +16,9 @@ class TFTDataModule(pl.LightningDataModule):
     def __init__(
         self,
         data_dir: str = "./data/resampled",
-        min_encoder_length: int = 50,
-        max_encoder_length: int = 250,
-        max_prediction_length: int = 50,
+        min_encoder_length: int = 30,
+        max_encoder_length: int = 150,  # Larger value tend to overfit
+        max_prediction_length: int = 20,  # Larger value tend to overfit
         batch_size: int = 64,
         num_workers: int = 4,
         train_split: float = 0.7,
@@ -185,17 +185,17 @@ class TFTDataModule(pl.LightningDataModule):
             target_normalizer=target_normalizer,
             add_relative_time_idx=True,
             add_target_scales=True,
-            randomize_length=None,
+            randomize_length=True,  # Enable randomization to reduce overfitting
             allow_missing_timesteps=False, # We probably want to avoid this
             categorical_encoders={"session_id_encoded": NaNLabelEncoder(add_nan=True)},
         )
         
         # Create validation and test datasets directly
-        # Unknown timestamp-based session IDs will be handled as NaN/unknown category
+        # Set predict=False to get proper validation sets with multiple samples per session
         self.validation = TimeSeriesDataSet.from_dataset(
             self.training, 
             val_data, 
-            predict=True, 
+            predict=False,  # Changed to False for proper validation
             stop_randomization=True
         )
         
