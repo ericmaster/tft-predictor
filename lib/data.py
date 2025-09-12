@@ -21,8 +21,8 @@ class TFTDataModule(pl.LightningDataModule):
         max_prediction_length: int = 20,  # Larger value tend to overfit
         batch_size: int = 64,
         num_workers: int = 4,
-        train_split: float = 0.7,
-        val_split: float = 0.15, # 0.15 test split
+        train_split: float = 0.75,
+        val_split: float = 0.15, # 0.10 test split
         min_sequence_length: int = 100,
         # target: str = "duration",
         time_idx: str = "time_idx",
@@ -188,6 +188,9 @@ class TFTDataModule(pl.LightningDataModule):
             randomize_length=True,  # Enable randomization to reduce overfitting
             allow_missing_timesteps=False, # We probably want to avoid this
             categorical_encoders={"session_id_encoded": NaNLabelEncoder(add_nan=True)},
+            # Additional regularization parameters
+            add_encoder_length=True,  # Explicitly add encoder length as a feature
+            # scalers={col: 'standard' for col in time_varying_unknown_reals},  # Standardize targets
         )
         
         # Create validation and test datasets directly

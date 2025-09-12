@@ -73,11 +73,15 @@ class TrailRunningTFT(TemporalFusionTransformer):
         if 'attention_head_size' not in kwargs:
             kwargs['attention_head_size'] = 4
         if 'dropout' not in kwargs:
-            kwargs['dropout'] = 0.2  # Larger to reduce overfitting
+            kwargs['dropout'] = 0.3
         if 'hidden_continuous_size' not in kwargs:
-            kwargs['hidden_continuous_size'] = 32
+            kwargs['hidden_continuous_size'] = 16
         if 'output_size' not in kwargs:
             kwargs['output_size'] = len(dataset.target_names)  # Multi-target output
+        if 'lstm_layers' not in kwargs:
+            kwargs['lstm_layers'] = 1
+        if 'weight_decay' not in kwargs:
+            kwargs['weight_decay'] = 0.005  # L2 regularization
         if 'loss' not in kwargs:
             # Define weights for multi-target forecasting
             # 80% weight for duration, 5% each for the other 4 variables

@@ -21,10 +21,10 @@ def find_latest_checkpoint():
 def train_tft_model(
     data_dir: str = "./data/resampled",
     max_epochs: int = 30,
-    min_encoder_length: int = 50,
-    max_encoder_length: int = 250,
+    min_encoder_length: int = 20,
+    max_encoder_length: int = 120,
     max_prediction_length: int = 50,
-    batch_size: int = 32,
+    batch_size: int = 64,
     hidden_size: int = 64,
     learning_rate: float = 0.001
 ):
@@ -76,12 +76,22 @@ def train_tft_model(
 
     early_stopping_callback = EarlyStopping(
         monitor="val_loss",
-        patience=15,  # Kept large to check for overfitting
+        patience=8,
         verbose=True,
-        mode="min"
+        mode="min",
+        min_delta=0.001,  # Minimum change to qualify as improvement
+        strict=True
     )
 
     learning_rate_callback = LearningRateMonitor(logging_interval="step")
+    
+    # Add StochasticWeightAveraging for better generalization
+    # from lightning.pytorch.callbacks import StochasticWeightAveraging
+    # swa_callback = StochasticWeightAveraging(
+    #     swa_lrs=1e-5,  # Lower learning rate for SWA
+    #     swa_epoch_start=0.8,  # Start SWA at 80% of training
+    #     annealing_epochs=5
+    # )
 
     logger = pl.loggers.CSVLogger("logs", name="tft_model")
     
@@ -97,10 +107,14 @@ def train_tft_model(
         enable_checkpointing=True,
         precision="32-true",  # Use full precision for better accuracy
         # precision="16-mixed",  # Mixed precision for speed and resource efficiency
+        # accumulate_grad_batches=2,  # Gradient accumulation for effective larger batch size
+        # val_check_interval=0.25,  # Check validation more frequently (4 times per epoch)
+        # log_every_n_steps=10,  # Log more frequently
         callbacks=[
             early_stopping_callback,
             learning_rate_callback,
-            checkpoint_callback
+            checkpoint_callback,
+            # swa_callback
         ]
     )
 
@@ -120,11 +134,12 @@ if __name__ == "__main__":
     # Train the model
     model, data_module, trainer = train_tft_model(
         data_dir="./data/resampled",
-        max_epochs=50,  # Likely early stop will trigger
-        min_encoder_length=30,
-        max_encoder_length=150,  # Larger may overfit
+        max_epochs=30,  # Likely early stop will trigger
+        min_encoder_length=20,
+        max_encoder_length=120,  # Larger may overfit
         max_prediction_length=20,
-        batch_size=32,
+        # batch_size=32,
+        batch_size=64,
         hidden_size=64
     )
     
