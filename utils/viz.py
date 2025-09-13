@@ -71,6 +71,7 @@ def plot_metrics(
     trainer=None,
     plot_metrics=[["train_loss", "valid_loss"], ["train_acc", "valid_acc"]],
     plot_titles=["Loss", "Accuracy"],
+    save_svg_path=None,
 ):
     """Plot training and validation metrics from a CSV file or a PyTorch Lightning trainer."""
     if metrics_csv_path is None:
@@ -89,18 +90,19 @@ def plot_metrics(
 
     df_metrics = pd.DataFrame(aggreg_metrics)
     for i, metrics in enumerate(plot_metrics):
-        df_metrics[metrics].plot(
+        ax = df_metrics[metrics].plot(
             grid=True,
             legend=True,
             xlabel="Epoch",
             ylabel=plot_titles[i].replace('_', ' ').title(),
             title=f"{metrics[0].replace('_', ' ').title()} vs {metrics[1].replace('_', ' ').title()}",
         )
-    # df_metrics[["train_loss", "valid_loss"]].plot(
-    #     grid=True, legend=True, xlabel="Epoch", ylabel="Loss"
-    # )
-    # df_metrics[["train_acc", "valid_acc"]].plot(
-    #     grid=True, legend=True, xlabel="Epoch", ylabel="ACC"
-    # )
-
-    plt.show()
+        if save_svg_path:
+            # Save each plot to SVG, appending index if multiple plots
+            base, ext = save_svg_path.rsplit('.', 1) if '.' in save_svg_path else (save_svg_path, 'svg')
+            svg_file = f"{base}.{ext}"
+            fig = ax.get_figure()
+            fig.savefig(svg_file, format="svg")
+            plt.close(fig)
+    if not save_svg_path:
+        plt.show()

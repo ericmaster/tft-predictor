@@ -106,7 +106,7 @@ class TFTDataModule(pl.LightningDataModule):
         valid_sessions = session_lengths[session_lengths >= min_required].index
         
         print(f"Minimum required sequence length: {min_required}")
-        print(f"Valid sessions (sufficient length): {len(valid_sessions)}/{len(session_lengths)}")
+        print(f"Valid sessions: {len(valid_sessions)}/{len(session_lengths)}")
         
         # Filter data to only include valid sessions
         self.full_data = self.full_data[self.full_data['session_id_encoded'].isin(valid_sessions)].copy()
@@ -157,13 +157,36 @@ class TFTDataModule(pl.LightningDataModule):
             "speed"
         ]
 
+        # Use different normalizers for different targets based on their characteristics
+        # This approach avoids the numerical issues we identified with softplus
         target_normalizer = MultiNormalizer(
             [
+                # Duration: Use log1p transformation for wide range (1.98 - 19,627 seconds)
+                # log1p = log(1 + x) avoids issues with zero values
                 GroupNormalizer(
                     groups=["session_id_encoded"],
-                    transformation="softplus"
+                    transformation="log1p"
+                ),
+                # Heart Rate: No transformation (standard normalization) for bounded range
+                GroupNormalizer(
+                    groups=["session_id_encoded"],
+                    transformation=None
+                ),
+                # Temperature: No transformation (standard normalization)
+                GroupNormalizer(
+                    groups=["session_id_encoded"],
+                    transformation=None
+                ),
+                # Cadence: No transformation (standard normalization)
+                GroupNormalizer(
+                    groups=["session_id_encoded"],
+                    transformation=None
+                ),
+                # Speed: No transformation (standard normalization)
+                GroupNormalizer(
+                    groups=["session_id_encoded"],
+                    transformation=None
                 )
-                for _ in target
             ]
         )
         
