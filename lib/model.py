@@ -64,20 +64,20 @@ class TrailRunningTFT(TemporalFusionTransformer):
 
     def __init__(self, mask_bias: float = -1e4, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._override_mask_bias(mask_bias)
+        # self._override_mask_bias(mask_bias)
 
-    def _override_mask_bias(self, mask_bias_value: float):
-        """Override mask_bias in all InterpretableMultiHeadAttention modules."""
-        for module in self.modules():
-            if isinstance(module, InterpretableMultiHeadAttention):
-                # Override the mask_bias used in its internal attention
-                if hasattr(module, "mask_bias"):
-                    module.mask_bias = mask_bias_value
-                # Also override in the nested MultiHeadAttention if accessible
-                if hasattr(module, "_attention"):
-                    attention_module = getattr(module, "_attention", None)
-                    if attention_module is not None and hasattr(attention_module, "mask_bias"):
-                        attention_module.mask_bias = mask_bias_value
+    # def _override_mask_bias(self, mask_bias_value: float):
+    #     """Override mask_bias in all InterpretableMultiHeadAttention modules."""
+    #     for module in self.modules():
+    #         if isinstance(module, InterpretableMultiHeadAttention):
+    #             # Override the mask_bias used in its internal attention
+    #             if hasattr(module, "mask_bias"):
+    #                 module.mask_bias = mask_bias_value
+    #             # Also override in the nested MultiHeadAttention if accessible
+    #             if hasattr(module, "_attention"):
+    #                 attention_module = getattr(module, "_attention", None)
+    #                 if attention_module is not None and hasattr(attention_module, "mask_bias"):
+    #                     attention_module.mask_bias = mask_bias_value
 
     @classmethod
     def from_dataset(cls, dataset, **kwargs):
@@ -96,7 +96,7 @@ class TrailRunningTFT(TemporalFusionTransformer):
         if 'hidden_continuous_size' not in kwargs:
             kwargs['hidden_continuous_size'] = 32
         if 'output_size' not in kwargs:
-            kwargs['output_size'] = len(dataset.target_names)  # Multi-target output
+            kwargs['output_size'] = len(dataset.target)  # Multi-target output
         if 'lstm_layers' not in kwargs:
             kwargs['lstm_layers'] = 1
         if 'weight_decay' not in kwargs:
@@ -104,7 +104,7 @@ class TrailRunningTFT(TemporalFusionTransformer):
         if 'loss' not in kwargs:
             # Use a simpler approach - just use MultiLoss with SMAPE for each target
             # This avoids potential compatibility issues with pytorch-forecasting
-            target_names = dataset.target_names
+            target_names = dataset.target
             
             # Create individual SMAPE losses for each target
             from pytorch_forecasting.metrics import MultiLoss, SMAPE

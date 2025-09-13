@@ -57,13 +57,13 @@ class DataResampler:
             )
             df["duration"] = df["duration"].interpolate().ffill().bfill()
 
-            # Resample to 2 meter intervals (distance is not a time index, so use reindex)
+            # Resample to n meter intervals (distance is not a time index, so use reindex)
             # Remove duplicate distances (keep first)
             df = df.drop_duplicates(subset='distance', keep='first')
             # Define resampling grid
             min_dist = np.floor(df['distance'].min())
             max_dist = np.ceil(df['distance'].max())
-            target_distances = np.arange(min_dist, max_dist + 2, 2)  # +2 to include endpoint
+            target_distances = np.arange(min_dist, max_dist + 5, 5)  # +5 to include endpoint
             # Set index, reindex, interpolate
             df = (
                 df.set_index('distance')
@@ -86,6 +86,9 @@ class DataResampler:
                 df["elevation_diff"].clip(upper=0).cumsum().fillna(0)
             )
 
+            # Caluclate duration diff
+            df["duration_diff"] = df["duration"].diff().fillna(0)
+
             # Final check: ensure no NaN values remain after resampling
             # Forward fill any remaining NaN values introduced by resampling
             df = df.ffill()
@@ -103,7 +106,7 @@ class DataResampler:
             df['session_id_encoded'] = self._extract_session_timestamp(df['session_id'].iloc[0])
 
             # Calculate distance difference
-            df["distance_diff"] = df["distance"].diff().fillna(0)
+            # df["distance_diff"] = df["distance"].diff().fillna(0)
 
             # Output the resampled file
             output_path = os.path.join(self.output_dir, file_name)

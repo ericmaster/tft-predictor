@@ -23,7 +23,7 @@ def train_tft_model(
     max_epochs: int = 30,
     min_encoder_length: int = 2,
     max_encoder_length: int = 200,
-    max_prediction_length: int = 50,
+    max_prediction_length: int = 200,
     batch_size: int = 64,
     hidden_size: int = 64,
     learning_rate: float = 0.001
@@ -135,9 +135,9 @@ if __name__ == "__main__":
     model, data_module, trainer = train_tft_model(
         data_dir="./data/resampled",
         max_epochs=30,  # Likely early stop will trigger
-        min_encoder_length=2, # For cold-start
+        min_encoder_length=2, # Limited for cold-start
         max_encoder_length=200,  # Larger may overfit
-        max_prediction_length=20,
+        max_prediction_length=200,
         # batch_size=32,
         batch_size=64,
         hidden_size=64

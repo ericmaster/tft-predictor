@@ -60,6 +60,7 @@ class TFTDataModule(pl.LightningDataModule):
         self.time_idx = time_idx
         self.group_ids = group_ids or ["session_id"]
         self.random_seed = random_seed
+        self.target_names = ['duration', 'heartRate', 'temperature', 'cadence', 'speed']
         
         # Data storage
         self.training = None
@@ -149,19 +150,13 @@ class TFTDataModule(pl.LightningDataModule):
         # Define target and unknown future variables (these need to be predicted/estimated)
         # We are performing multi-target forecasting: predict all these variables
         # Their past values are used as inputs to help predict their own and others' futures
-        target = time_varying_unknown_reals = [
-            "duration",
-            "heartRate",
-            "temperature", 
-            "cadence", 
-            "speed"
-        ]
+        target = time_varying_unknown_reals = self.target_names
 
         # Use different normalizers for different targets based on their characteristics
         # This approach avoids the numerical issues we identified with softplus
         target_normalizer = MultiNormalizer(
             [
-                # Duration: Use log1p transformation for wide range (1.98 - 19,627 seconds)
+                # Duration: Use log1p transformation for wide range (~2 - ~20,000 seconds)
                 # log1p = log(1 + x) avoids issues with zero values
                 GroupNormalizer(
                     groups=["session_id_encoded"],
