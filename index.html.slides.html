@@ -8120,23 +8120,6 @@ Test samples: 12
 </div>
 </div>
 </div></section></section><section><section>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=8e75da73">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h3 id="Results**">Results**<a class="anchor-link" href="#Results**">¶</a></h3><ul>
-<li><strong>MAPE</strong>: 80.64% (expected to be &lt;20%)</li>
-<li><strong>RMSE</strong>: 1,393 seconds (over 23 minutes average error)</li>
-<li><strong>Actual duration range</strong>: 1.98 - 19,627 seconds</li>
-<li><strong>Predicted duration range</strong>: 5.87 - 13,234 seconds</li>
-</ul>
-<p>**Need to verify calculations. May change in upcoming run results.</p>
-</div>
-</div>
-</div>
-</div></section></section><section><section>
 <div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=b22d24ba">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
@@ -8144,15 +8127,12 @@ Test samples: 12
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="Conclusions">Conclusions<a class="anchor-link" href="#Conclusions">¶</a></h2><ul>
-<li>Time series (and sequence in general) can present different complexities. Require:<ul>
-<li>Careful analysis of data processing and loading.</li>
-<li>If using an already pre-built model architecture from a library it is important to understand the hyperparameters so they can be configured appropriately.</li>
-</ul>
-</li>
-<li>Starting with limited number of epochs and conservative parameters for the model lead to more efficient manual parameter optimization</li>
-<li>During parameter optimizations, it is very useful to keep and plots metrics for each of the runs and compare as it gives insight in what could be wrong.</li>
-<li>Even though training can be time consuming. It is essential to test one change and a time and compare with previous runs</li>
-<li>Regularization can have a significant impact on training if setup adequately</li>
+<li>Time series data demand <strong>careful preprocessing</strong>: Alignment with domain semantics (e.g., distance-based sampling &gt; time-based) is critical for meaningful learning.</li>
+<li>Leverage <strong>pre-built architectures</strong> wisely: Understand every hyperparameter (e.g., min_encoder_length, attention heads, dropout) — default settings rarely suit niche domains like trail running.</li>
+<li><strong>Start small</strong>, optimize deliberately: Begin with few epochs and conservative hyperparameters to establish baselines; avoid premature complexity.</li>
+<li>Track &amp; visualize <strong>every</strong> experiment: Log validation loss, metrics, and attention patterns per run — plots reveal overfitting, instability, or feature misalignment.</li>
+<li>Change <strong>one thing at a time</strong>: Even with long training times, systematic ablation ensures you know why performance changes — no black-box tuning.</li>
+<li><strong>Regularization is non-negotiable</strong>: Dropout, weight decay, and early stopping are essential to prevent memorization on small, noisy physiological datasets.</li>
 </ul>
 </div>
 </div>
@@ -8165,13 +8145,14 @@ Test samples: 12
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="Recommendations-and-Next-Steps">Recommendations and Next Steps<a class="anchor-link" href="#Recommendations-and-Next-Steps">¶</a></h2><ul>
-<li>Train with <code>min_encoder_length=0</code></li>
-<li>Instead of duration prediction, it is probably more adequeate for the model architecture to predict the duration difference instead and calculate the total duration as an accumulated sum of the duration differences</li>
-<li>Resample to different intervals, instead of each 2m, each 5m could be valid as well</li>
-<li>Use K-Fold Cross-Validation for correct parameter optimization to choose the most appropriate hyperparameter combination</li>
-<li>Reearch a technique for data augmentation more appropriate to the trail running case</li>
-<li>Introduce more features to the data model (RPE, hydration, accelerometer, gyroscope)</li>
-<li>Add initial values for first step inference</li>
+<li>Log validation metrics at regular intervals → Discard assumptions that the model learns from the first epoch; monitor convergence behavior.</li>
+<li>Set min_encoder_length=0 → Enables robust cold-start inference by allowing predictions even with minimal historical context.</li>
+<li>Predict duration differences, not absolute duration → Accumulate deltas over time for greater numerical stability and reduced error propagation.</li>
+<li>Evaluate resampling intervals (e.g., 2m vs. 5m) → Balance temporal resolution with computational efficiency — 5m may be sufficient for most trail terrain.</li>
+<li>Adopt K-Fold Cross-Validation → Replace single-session splits to ensure reliable hyperparameter selection across diverse runner profiles.</li>
+<li>Explore domain-specific data augmentation → Apply techniques like synthetic terrain perturbations, Gaussian noise on physiological signals, or DTW-based warping.</li>
+<li>Enrich input features → Integrate RPE (perceived exertion), hydration logs, accelerometer/gyroscope gait metrics, and barometric pressure.</li>
+<li>Initialize inference with baseline values → Provide sensible starting points (e.g., resting HR, initial speed) to stabilize early-time predictions.</li>
 </ul>
 </div>
 </div>
