@@ -1,4 +1,5 @@
 import re
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -106,3 +107,73 @@ def plot_metrics(
             plt.close(fig)
     if not save_svg_path:
         plt.show()
+
+def visualize_predictions(raw_predictions, batch_id=0, target_idx=0, target_name="Duration"):
+    """
+    Visualize predictions vs actual values for a specific batch and target variable.
+    
+    Args:
+        raw_predictions: Raw predictions from model.predict()
+        batch_id: Batch index to visualize (default: 0)
+        target_idx: Target variable index (0=duration, 1=heartRate, 2=temperature, 3=cadence, 4=speed)
+        target_name: Name of the target variable for labeling
+    """
+    # Debug the structure
+    # print(f"Output type: {type(raw_predictions.output)}")
+    # print(f"Output length: {len(raw_predictions.output)}")
+    
+    # for i, output in enumerate(raw_predictions.output):
+    #     print(f"Output {i} type: {type(output)}")
+    #     if hasattr(output, 'shape'):
+    #         print(f"Output {i} shape: {output.shape}")
+    #     elif isinstance(output, list):
+    #         print(f"Output {i} is a list with {len(output)} elements")
+    #         if len(output) > 0 and hasattr(output[0], 'shape'):
+    #             print(f"Output {i}[0] shape: {output[0].shape}")
+
+    # Debug the decoder_target structure
+    # print(f"\nDecoder target structure:")
+    # print(f"decoder_target type: {type(raw_predictions.x['decoder_target'])}")
+    # print(f"decoder_target length: {len(raw_predictions.x['decoder_target'])}")
+    # for i, target in enumerate(raw_predictions.x['decoder_target']):
+    #     print(f"decoder_target[{i}] shape: {target.shape}")
+
+    # Extract predictions - handle the nested list structure
+    if isinstance(raw_predictions.output[0], list):
+        # If output[0] is a list, get the specified batch sample, all time steps, specified target
+        predictions = raw_predictions.output[0][target_idx][batch_id, :, 0].detach().cpu().numpy()
+    else:
+        # If it's a tensor directly, get specified batch sample, all time steps, specified target
+        predictions = raw_predictions.output[0][batch_id, :, target_idx].detach().cpu().numpy()
+
+    # Extract actuals - select specified batch sample and target
+    actuals = raw_predictions.x['decoder_target'][target_idx][batch_id, :].detach().cpu().numpy()
+
+    # print(f"\n{target_name} predictions shape: {predictions.shape}")
+    # print(f"{target_name} actuals shape: {actuals.shape}")
+
+    # Create visualization plot
+    plt.figure(figsize=(12, 6))
+    time_steps = range(len(predictions))
+
+    plt.plot(time_steps, actuals, label=f'Actual {target_name}', color='blue', linewidth=2)
+    plt.plot(time_steps, predictions, label=f'Predicted {target_name}', color='orange', linewidth=2)
+
+    plt.xlabel('Time Steps')
+    plt.ylabel(f'{target_name}')
+    plt.title(f'{target_name} Predictions vs Actual (Batch {batch_id})')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
+    
+    # Calculate and display error metrics
+    mse = np.mean((predictions - actuals) ** 2)
+    mae = np.mean(np.abs(predictions - actuals))
+    rmse = np.sqrt(mse)
+    
+    print(f"\nError Metrics for {target_name} (Batch {batch_id}):")
+    print(f"MSE: {mse:.4f}")
+    print(f"MAE: {mae:.4f}")
+    print(f"RMSE: {rmse:.4f}")
+    
+    return predictions, actuals

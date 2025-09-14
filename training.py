@@ -26,7 +26,7 @@ def train_tft_model(
     max_prediction_length: int = 200,
     batch_size: int = 64,
     hidden_size: int = 64,
-    learning_rate: float = 0.001
+    learning_rate: float = 0.0005
 ):
     """
     Train the TFT model.
@@ -76,7 +76,7 @@ def train_tft_model(
 
     early_stopping_callback = EarlyStopping(
         monitor="val_loss",
-        patience=10,
+        patience=30,
         verbose=True,
         mode="min",
         min_delta=0.001,  # Minimum change to qualify as improvement
@@ -140,7 +140,8 @@ if __name__ == "__main__":
         max_prediction_length=200,
         # batch_size=32,
         batch_size=64,
-        hidden_size=64
+        hidden_size=64,
+        learning_rate=0.0005
     )
     
     print("Training completed!")

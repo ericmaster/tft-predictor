@@ -63,6 +63,12 @@ class TFTDataModule(pl.LightningDataModule):
         self.target_names = ['duration', 'heartRate', 'temperature', 'cadence', 'speed']
         
         # Data storage
+        # Raw data
+        self.train_data = None
+        self.val_data = None
+        self.test_data = None
+
+        # Datasets
         self.training = None
         self.validation = None
         self.test = None
@@ -125,17 +131,17 @@ class TFTDataModule(pl.LightningDataModule):
         test_session_ids = all_session_ids[train_sessions + val_sessions:]
         
         # Create data splits by sessions
-        train_data = self.full_data[self.full_data['session_id'].isin(train_session_ids)].copy()
-        val_data = self.full_data[self.full_data['session_id'].isin(val_session_ids)].copy()
-        test_data = self.full_data[self.full_data['session_id'].isin(test_session_ids)].copy()
+        self.train_data = self.full_data[self.full_data['session_id'].isin(train_session_ids)].copy()
+        self.val_data = self.full_data[self.full_data['session_id'].isin(val_session_ids)].copy()
+        self.test_data = self.full_data[self.full_data['session_id'].isin(test_session_ids)].copy()
         
         print(f"Session-based splits for cold-start evaluation:")
         print(f"Train sessions: {len(train_session_ids)}, Val sessions: {len(val_session_ids)}, Test sessions: {len(test_session_ids)}")
-        print(f"Train data points: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}")
+        print(f"Train data points: {len(self.train_data)}, Val: {len(self.val_data)}, Test: {len(self.test_data)}")
         
         # Verify no overlap between splits
-        overlap_train_val = set(train_data['session_id'].unique()) & set(val_data['session_id'].unique())
-        overlap_train_test = set(train_data['session_id'].unique()) & set(test_data['session_id'].unique())
+        overlap_train_val = set(self.train_data['session_id'].unique()) & set(self.val_data['session_id'].unique())
+        overlap_train_test = set(self.train_data['session_id'].unique()) & set(self.test_data['session_id'].unique())
         print(f"Overlap between train-val: {len(overlap_train_val)}, train-test: {len(overlap_train_test)}")
         
         # Define known future variables (these will be available at prediction time)
@@ -190,7 +196,7 @@ class TFTDataModule(pl.LightningDataModule):
         from pytorch_forecasting.data.encoders import NaNLabelEncoder
         
         self.training = TimeSeriesDataSet(
-            train_data,
+            self.train_data,
             time_idx="time_idx",
             # target=self.target,
             target=target, # multi-target
@@ -215,14 +221,16 @@ class TFTDataModule(pl.LightningDataModule):
         # Set predict=False to get proper validation sets with multiple samples per session
         self.validation = TimeSeriesDataSet.from_dataset(
             self.training, 
-            val_data, 
+            self.val_data, 
             predict=False,  # Changed to False for proper validation
             stop_randomization=True
         )
         
         self.test = TimeSeriesDataSet.from_dataset(
-            self.training, 
-            test_data, 
+            self.training,
+            self.test_data,
+            min_prediction_length=self.max_prediction_length,
+            max_prediction_length=self.max_prediction_length, 
             predict=True, 
             stop_randomization=True
         )
@@ -254,3 +262,52 @@ class TFTDataModule(pl.LightningDataModule):
             batch_size=self.batch_size, 
             num_workers=self.num_workers
         )
+
+# Create sliding window chunks from the start of each session
+def create_sliding_windows(df, session_col, encoder_length, prediction_length, step_size=200):
+    """
+    Create sliding window chunks from the beginning of each session.
+    
+    Args:
+        df: DataFrame with session data
+        session_col: Column name for session identifier
+        encoder_length: Length of encoder sequence
+        prediction_length: Length of prediction sequence  
+        step_size: Step size for sliding window (default 200 = 1000m steps)
+    """
+    chunks = []
+    
+    for session_id in df[session_col].unique():
+        session_data = df[df[session_col] == session_id].copy().reset_index(drop=True)
+        
+        if len(session_data) < encoder_length + prediction_length:
+            print(f"Session {session_id} too short: {len(session_data)} < {encoder_length + prediction_length}")
+            continue
+            
+        # Create sliding windows from start to end
+        max_start = len(session_data) - (encoder_length + prediction_length)
+        
+        for start_idx in range(0, max_start + 1, step_size):
+            end_idx = start_idx + encoder_length + prediction_length
+            
+            if end_idx <= len(session_data):
+                chunk_data = session_data.iloc[start_idx:end_idx].copy()
+                
+                # Reset time_idx for this chunk (relative indexing)
+                chunk_data['time_idx'] = range(len(chunk_data))
+                
+                chunk_info = {
+                    'session_id': session_id,
+                    'chunk_id': len(chunks),
+                    'start_idx': start_idx,
+                    'end_idx': end_idx,
+                    'data': chunk_data,
+                    'encoder_length': encoder_length,
+                    'prediction_length': prediction_length,
+                    'start_distance': session_data.iloc[start_idx]['distance'] if 'distance' in session_data.columns else start_idx * 2,
+                    'end_distance': session_data.iloc[end_idx-1]['distance'] if 'distance' in session_data.columns else (end_idx-1) * 2
+                }
+                
+                chunks.append(chunk_info)
+    
+    return chunks
