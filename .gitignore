@@ -213,3 +213,5 @@ checkpoints
 debug_*
 test_*
 backups
+data-explore.ipynb
+.github

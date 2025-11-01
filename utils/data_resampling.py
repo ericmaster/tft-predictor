@@ -36,6 +36,12 @@ class DataResampler:
             else self.training_files
         )
         for file_name in iterator:
+            # Skip metadata files and non-training session files
+            if not file_name.startswith('training-session-') or not file_name.endswith('.csv'):
+                if verbose:
+                    tqdm.write(f"Skipping non-training file: {file_name}")
+                continue
+                
             if verbose:
                 tqdm.write(f"Processing file: {file_name}")
             file_path = os.path.join(self.input_dir, file_name)
@@ -88,6 +94,31 @@ class DataResampler:
 
             # Caluclate duration diff
             df["duration_diff"] = df["duration"].diff().fillna(0)
+
+            # === FATIGUE PROXY FEATURES ===
+            # Calculate average heart rate so far (running average from start)
+            df["avg_heart_rate_so_far"] = df["heartRate"].expanding().mean().fillna(0)
+            
+            # Calculate elevation gain of last 100m (rolling window)
+            # Since we're at 5m intervals, 100m = 20 data points
+            window_size = 20  # 20 * 5m = 100m
+            df["elevation_gain_of_last_100m"] = (
+                df["elevation_diff"]
+                .clip(lower=0)  # Only positive changes
+                .rolling(window=window_size, min_periods=1)
+                .sum()
+                .fillna(0)
+            )
+            
+            # Calculate elevation loss of last 100m (rolling window)
+            df["elevation_loss_of_last_100m"] = (
+                df["elevation_diff"]
+                .clip(upper=0)  # Only negative changes (will be negative values)
+                .abs()  # Convert to positive for interpretability
+                .rolling(window=window_size, min_periods=1)
+                .sum()
+                .fillna(0)
+            )
 
             # Final check: ensure no NaN values remain after resampling
             # Forward fill any remaining NaN values introduced by resampling

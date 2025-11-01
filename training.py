@@ -21,8 +21,8 @@ def find_latest_checkpoint():
 def train_tft_model(
     data_dir: str = "./data/resampled",
     max_epochs: int = 30,
-    min_encoder_length: int = 2,
-    max_encoder_length: int = 200,
+    min_encoder_length: int = 1, # Limited for cold-start
+    max_encoder_length: int = 20,
     max_prediction_length: int = 200,
     batch_size: int = 64,
     hidden_size: int = 64,
@@ -135,8 +135,8 @@ if __name__ == "__main__":
     model, data_module, trainer = train_tft_model(
         data_dir="./data/resampled",
         max_epochs=30,  # Likely early stop will trigger
-        min_encoder_length=2, # Limited for cold-start
-        max_encoder_length=200,  # Larger may overfit
+        min_encoder_length=1, # Limited for cold-start
+        max_encoder_length=20,  # Larger may overfit
         max_prediction_length=200,
         # batch_size=32,
         batch_size=64,
