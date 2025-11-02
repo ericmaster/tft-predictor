@@ -112,8 +112,8 @@ class TrailRunningTFT(TemporalFusionTransformer):
             # Define weights for multi-target forecasting
             target_weights = []
             for name in target_names:
-                if name == "duration":
-                    target_weights.append(0.8)  # 80% weight for duration
+                if name == "duration_diff":
+                    target_weights.append(0.85)  # 85% weight for duration_diff
                 else:
                     target_weights.append(0.05)  # 5% weight for each other variable
             
